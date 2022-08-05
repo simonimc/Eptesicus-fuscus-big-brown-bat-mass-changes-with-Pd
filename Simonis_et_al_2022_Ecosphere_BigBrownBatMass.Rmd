@@ -1,0 +1,831 @@
+---
+title: "Simonis_et_al_2022_Ecosphere_BigBrownBatMass"
+author: "Molly"
+date: "7/25/2022"
+output: html_document
+---
+
+This RMD file provides code for all analyses and figures from the Simonis et al. 2022, Ecosphere publication entitled "Long-term exposure to an invasive fungal pathogen decreases Eptesicus fuscus body mass with increasing latitude". Data and its description (including metadata) can be found and downloaded on the Dryad Digital Repository DOI: https://doi.org/10.5061/dryad.ngf1vhhvv . 
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(wesanderson)
+library(plyr)
+library(ggridges)
+library(lme4)
+library(lmerTest)
+library(car)
+library(pscl)
+library(glmmTMB)
+library(emmeans)
+library(ggforce)
+library(housingData)
+library(sp)
+library(maps)
+library(maptools)
+library(MuMIn)
+library(usmap)
+library(viridis)
+library(patchwork)
+library(effects)
+library(performance)
+library(ggnewscale)
+library(scales)
+library(sjPlot)
+library(ggeffects)
+```
+
+
+Read in data and separate into male and female datasets
+```{r}
+#read in adult big brown bat capture data
+EPFU_data<- read.csv('SIMONIS_et_al_BigBrownBatData_Dryad.csv', header = T, sep = ",")
+
+head(EPFU_data)
+str(EPFU_data)
+
+
+#split into male and female datasets
+
+#get adult female dataset
+fem_EPFU<- EPFU_data %>%
+  filter(age == 'adult' & sex == 'female') %>%
+  droplevels()
+
+head(fem_EPFU)
+str(fem_EPFU)
+##14,162 individual EPFU adult female captures
+
+#order factors appropriately
+fem_EPFU$repstat<- factor(fem_EPFU$repstat, levels= c("non-reproductive", "pregnant", "lactating", "post-lactating"))
+
+fem_EPFU$disease_time_step<- factor(fem_EPFU$disease_time_step, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
+
+
+
+
+#get adult male dataset
+male_EPFU<- EPFU_data %>% 
+  filter(age == 'adult' & sex == 'male') %>% 
+  droplevels()
+
+head(male_EPFU)
+str(male_EPFU)
+##9,967 individual EPFU adult male captures
+
+male_EPFU$disease_time_step<- factor(male_EPFU$disease_time_step, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
+
+```
+
+
+Weight entries by disease_time_step
+```{r}
+#for female dataset
+#create column for disease status entry weights and fill with 0s first
+fem_EPFU$wt_disease_time_step<- NA
+
+#enter weighted values for pre-invasion years
+fem_EPFU$wt_disease_time_step[fem_EPFU$disease_time_step == 'pre-invasion']<- length(fem_EPFU$disease_time_step[fem_EPFU$disease_time_step == 'pre-invasion'])/length(fem_EPFU$disease_time_step)
+
+#enter weighted values for invasion years
+fem_EPFU$wt_disease_time_step[fem_EPFU$disease_time_step == 'invasion']<- length(fem_EPFU$disease_time_step[fem_EPFU$disease_time_step == 'invasion'])/length(fem_EPFU$disease_time_step)
+
+#enter weighted values for epidemic years
+fem_EPFU$wt_disease_time_step[fem_EPFU$disease_time_step == 'epidemic']<- length(fem_EPFU$disease_time_step[fem_EPFU$disease_time_step == 'epidemic'])/length(fem_EPFU$disease_time_step)
+
+#enter weighted values for established years
+fem_EPFU$wt_disease_time_step[fem_EPFU$disease_time_step == 'established']<- length(fem_EPFU$disease_time_step[fem_EPFU$disease_time_step == 'established'])/length(fem_EPFU$disease_time_step)
+
+
+
+#for male dataset
+#create column for disease status entry weights and fill with 0s first
+male_EPFU$wt_disease_time_step<- NA
+
+#enter weighted values for pre-invasion years
+male_EPFU$wt_disease_time_step[male_EPFU$disease_time_step == 'pre-invasion']<- length(male_EPFU$disease_time_step[male_EPFU$disease_time_step == 'pre-invasion'])/length(male_EPFU$disease_time_step)
+
+#enter weighted values for invasion years
+male_EPFU$wt_disease_time_step[male_EPFU$disease_time_step == 'invasion']<- length(male_EPFU$disease_time_step[male_EPFU$disease_time_step == 'invasion'])/length(male_EPFU$disease_time_step)
+
+#enter weighted values for epidemic years
+male_EPFU$wt_disease_time_step[male_EPFU$disease_time_step == 'epidemic']<- length(male_EPFU$disease_time_step[male_EPFU$disease_time_step == 'epidemic'])/length(male_EPFU$disease_time_step)
+
+#enter weighted values for established years
+male_EPFU$wt_disease_time_step[male_EPFU$disease_time_step == 'established']<- length(male_EPFU$disease_time_step[male_EPFU$disease_time_step == 'established'])/length(male_EPFU$disease_time_step)
+
+```
+
+
+Create and test models for adult female big brown bat mass and mass variation
+```{r}
+#create model
+fem_mass_mod1<- lmer(mass ~ county_centroid_lat*disease_time_step*repstat + (1|site_mask), data = fem_EPFU, weights = wt_disease_time_step)
+
+#check assumptions
+plot_model(fem_mass_mod1, type='diag')
+
+#test model
+anova(fem_mass_mod1)
+
+#model summary
+summary(fem_mass_mod1)
+
+#model R^2
+r.squaredGLMM(fem_mass_mod1)
+
+
+#set post-hoc emmeans observation number bc the dataset exceeds the default limit
+#this setting will be good for male dataset too b/c females have the more observations
+emm_options(pbkrtest.limit = 14162)
+
+
+#create marginal means comparisons for fixed effects interaction
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+ems_fem_mass_mod1<- emmeans(fem_mass_mod1, ~county_centroid_lat*disease_time_step*repstat)
+
+#obtain contrasts (will give latitudinal point where interaction occured in space)
+contrast(ems_fem_mass_mod1)
+
+
+#find slopes
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+emt_fem_mass_mod1<- emtrends(fem_mass_mod1, ~repstat*disease_time_step, var = 'county_centroid_lat')
+
+
+#get predictions for estimated marginal means for plotting later
+fem_mass_mod1_pred<- as.data.frame(ggemmeans(fem_mass_mod1, terms = c('county_centroid_lat', 'disease_time_step', 'repstat'), type = 'fe'))
+
+
+#update the column names on the prediction df
+colnames(fem_mass_mod1_pred) <- c('county_centroid_lat', 'mass', 'std.error', 'conf.low', 'conf.high', 'disease_time_step', 'repstat')
+
+
+
+
+
+#Now need to determine if female mass differs above and below latitudinal point where interaction occurs
+
+#create column for categorical levels north and south of lat point where interaction occurs
+fem_EPFU$lat_category<- ifelse(fem_EPFU$county_centroid_lat > 39.6, 'north', 'south')
+
+
+#get number of entries for north and south of lat point where interaction occurs
+length(fem_EPFU$lat_category[fem_EPFU$lat_category == 'north'])
+       ##9411
+length(fem_EPFU$lat_category[fem_EPFU$lat_category == 'south'])
+       ##4751
+#create column for weights of north and south of lat_category entries
+fem_EPFU$wt_lat_category<- ifelse(fem_EPFU$lat_category == 'north', (9411/14166),(4751/14166))
+
+
+#Now see what differences in female mass are north and south of latitudinal point where interaction occurs
+#Create secondary mass model
+fem_mass_mod2<- lmer(mass ~ lat_category*repstat*disease_time_step + (1|site_mask), data = fem_EPFU, weights = wt_lat_category)
+
+
+#check assumptions
+plot_model(fem_mass_mod2, type='diag')
+
+
+#test model
+anova(fem_mass_mod2)
+
+#obtain summarry
+summary(fem_mass_mod2)
+
+#get model R^2
+r.squaredGLMM(fem_mass_mod2)
+
+
+#posthoc analyses
+#create marginal means comparisons for the fixed effects interaction
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+ems_fem_mass_mod2<- emmeans(fem_mass_mod2, ~lat_category*disease_time_step*repstat)
+
+
+#get pairwise comparisons with different groupings (i.e. grouped by lat_category, disease_time_step, or repstat)
+pairs(ems_fem_mass_mod2, simple = 'each')
+
+```
+
+
+Determine how the difference in mass north to south changes over disease status time-steps by reproductive status
+```{r}
+
+#Create vectors for new dataframe
+repstat2<-c(rep('non-reproductive', 4), rep('pregnant', 4), rep('lactating', 4), rep('post-lactating', 4))
+
+repstat2<- factor(repstat2, levels = c('non-reproductive', 'pregnant', 'lactating', 'post-lactating'))
+
+
+
+disease_time_step2<- rep(c('pre-invasion', 'invasion', 'epidemic', 'established'), 4)
+
+disease_time_step2<- factor(disease_time_step2, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
+
+
+#north to south mass difference and SE pulled from north-south comparisons in pairs(ems_fem_mass_mod2, simple = 'each') output
+fem_mass_diff<- c(0.3336, 0.7814, 0.9441, 1.3959, 0.4469, 0.1027, 0.7394, 1.4222, 0.5092, 0.7960, 1.1952, 1.5795, 0.0673, 0.7112, 1.4523, 0.6438)
+
+fem_mass_diff_SE<- c(0.332, 0.337, 0.261, 0.268, 0.401, 0.381, 0.240, 0.296, 0.289, 0.267, 0.199, 0.209, 0.271, 0.259, 0.210, 0.234)
+
+fem_NS_diff_df<- data.frame(repstat2, disease_time_step2, fem_mass_diff, fem_mass_diff_SE)
+
+
+#To calculate differences in body condition differences over time, must find p-values manually from NS_diff_df's 
+
+#Use equation 2*pnorm(-abs((mean2 - mean1)/SE1)) where mean2 is the mean value you want to compare, mean1 is the original mean to compare it to, and SE1 is the SE from mean1. Basically treat mean1 and SE1 as your baseline. In our case, the baseline is shifting overtime, so the earlier time-step in the comparison will hold mean1 and SE1
+
+#Eg for non-reproductive females comparing pre-invasion to invasion NS differences in mass:
+#2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == #'invasion'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == #'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == #'pre-invasion']))
+
+####to get female comparisons in some form of a legible table to read
+repstat3<- c(rep('non-reproductive', 6), rep('pregnant', 6), rep('lactating', 6), rep('post-lactating', 6))
+
+comparison<- rep(c('pre-inv', 'pre-epi', 'pre-est', 'inv-epi', 'inv-est', 'epi-est'), 4)
+
+fem_NS_diff_pvalues<- data.frame(repstat3, comparison)
+
+fem_NS_diff_pvalues$mass_p<-c(
+  2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'invasion'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'non-reproductive' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'invasion'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])),
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'pregnant' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'pre-invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'invasion'])), 
+                               2*pnorm(-abs((fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'established'] - fem_NS_diff_df$fem_mass_diff[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])/fem_NS_diff_df$fem_mass_diff_SE[fem_NS_diff_df$repstat2 == 'post-lactating' & fem_NS_diff_df$disease_time_step2 == 'epidemic'])))
+
+
+
+fem_NS_diff_pvalues
+
+
+```
+
+
+
+Determine how mass variation changes over Pd disease status time-steps by female reproductive status
+```{r}
+#For mass variation models, will use the latitudinal point where interaction occurs already identified in 1st average mass model (39.6 degrees N)
+
+#First make year and month categorical variables
+fem_EPFU$year<- factor(fem_EPFU$year, levels = c('1990', '1991', '1992', '1994', '1998', '1999', '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020'))
+
+
+fem_EPFU$month<- factor(fem_EPFU$month, levels = c('3', '4', '5', '6', '7', '8', '9', '10'))
+
+
+
+#create 1st model to extract mass variation yearly, monthly and by site
+fem_mass_var_mod1<- lmer(mass ~ (1|year) + (1|month) + (1|site_mask), data = fem_EPFU)
+
+#check assumptions
+plot_model(fem_mass_var_mod1, type='diag')
+
+
+#obtain model summary
+summary(fem_mass_var_mod1)
+
+
+#get R^2
+r.squaredGLMM(fem_mass_var_mod1)
+
+
+#extract residuals from the model and add to data frame
+fem_EPFU$mass_resid<- resid(fem_mass_var_mod1)
+
+
+
+#Create secondary model using residuals from the initial model as a proxy for mass variation as the response
+fem_mass_var_mod2<- lm(mass_resid ~ disease_time_step*repstat*lat_category, data = fem_EPFU, weights = wt_lat_category)
+
+
+#test model
+anova(fem_mass_var_mod2)
+
+#obtain model summary
+summary(fem_mass_var_mod2)
+
+#get R^2
+r.squaredGLMM(fem_mass_var_mod2)
+
+
+#post hoc analyses
+#make marginal means comparisons for secondary model interaction 
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+ems_fem_mass_var_mod2<- emmeans(fem_mass_var_mod2, ~lat_category*repstat*disease_time_step)
+
+
+#view pairwise comparisons groups by either lat_category, repstat, or disease status
+pairs(ems_fem_mass_var_mod2, simple = 'each')
+
+```
+
+
+Create and test models for adult male big brown bat mass and mass variation in the same fashion as females, but do not include reproductive status
+```{r}
+#create model
+male_mass_mod1<- lmer(mass ~ county_centroid_lat*disease_time_step + (1|site_mask), data = male_EPFU, weights = wt_disease_time_step)
+
+#check assumptions
+plot_model(male_mass_mod1, type='diag')
+
+
+anova(male_mass_mod1)
+
+
+summary(male_mass_mod1)
+
+
+r.squaredGLMM(male_mass_mod1)
+
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+ems_male_mass_mod1<- emmeans(male_mass_mod1, ~county_centroid_lat*disease_time_step)
+
+contrast(ems_male_mass_mod1)
+
+
+#find slopes
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+emt_male_mass_mod1<- emtrends(male_mass_mod1, ~disease_time_step, var = 'county_centroid_lat')
+
+
+#get predictions for estimated marginal means for plotting later
+male_mass_mod1_pred<- as.data.frame(ggemmeans(male_mass_mod1, terms = c('county_centroid_lat', 'disease_time_step'), type = 'fe'))
+
+#update the column names on the prediction df
+colnames(male_mass_mod1_pred) <- c('county_centroid_lat', 'mass', 'std.error', 'conf.low', 'conf.high', 'disease_time_step')
+
+
+#Now need to determine if male mass differs above and below latitudinal point where interaction occurs
+
+#create column for categorical levels north and south of latitudinal point where interaction occurs
+male_EPFU$lat_category<- ifelse(male_EPFU$county_centroid_lat > 39.6, 'north', 'south')
+
+#get number of entries for north and south of spatial threshold
+length(male_EPFU$lat_category[male_EPFU$lat_category == 'north'])
+       ##6273
+length(male_EPFU$lat_category[male_EPFU$lat_category == 'south'])
+       ##3694
+#creat column for weights of north and south of lat_category entries
+male_EPFU$wt_lat_category<- ifelse(male_EPFU$lat_category == 'north', (6273/9967),(3694/9967))
+
+
+#Now see what differences in male mass north and south of latitudinal point where interaction occurs
+male_mass_mod2<- lmer(mass ~ lat_category*disease_time_step + (1|site_mask), data = male_EPFU, weights = wt_lat_category)
+
+#check assumptions
+plot_model(male_mass_mod2, type='diag')
+
+
+anova(male_mass_mod2)
+
+
+summary(male_mass_mod2)
+
+
+r.squaredGLMM(male_mass_mod2)
+
+#NOTE: emmeans functions take a long time to run with this dataset (~15-30 min)
+ems_male_mass_mod2<- emmeans(male_mass_mod2, ~lat_category*disease_time_step)
+
+pairs(ems_male_mass_mod2, simple = 'each')
+
+
+###Get north/south comparisons into a dataframe for graphing later
+disease_time_step3<- c('pre-invasion', 'invasion', 'epidemic', 'established')
+disease_time_step3<- factor(disease_time_step3, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
+
+#mass diff and SE pulled from north-south comparisons in pairs(ems_male_mass_mod2, simple = 'each') output
+male_mass_diff<- c(0.3281, 0.0673, 0.7461, 0.7795)
+male_mass_diff_SE<- c(0.155, 0.149, 0.107, 0.120)
+
+
+male_NS_diff_df<- data.frame(disease_time_step3, male_mass_diff, male_mass_diff_SE)
+```
+
+
+Get changes to differences in male body condition over Pd time-steps
+```{r}
+####get male comparisons in some form of a legible table to read like you did for females
+
+comparison2<- c('pre-inv', 'pre-epi', 'pre-est', 'inv-epi', 'inv-est', 'epi-est')
+
+male_NS_diff_pvalues<- data.frame(comparison2)
+
+male_NS_diff_pvalues$mass_p<- c(2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'invasion'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'pre-invasion'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'pre-invasion'])),  
+                               2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'epidemic'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'pre-invasion'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'pre-invasion'])), 
+                              2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'established'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'pre-invasion'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'pre-invasion'])), 
+                              2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'epidemic'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'invasion'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'invasion'])), 
+                              2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'established'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'invasion'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'invasion'])), 
+                              2*pnorm(-abs((male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'established'] - male_NS_diff_df$male_mass_diff[male_NS_diff_df$disease_time_step3 == 'epidemic'])/male_NS_diff_df$male_mass_diff_SE[ male_NS_diff_df$disease_time_step3 == 'epidemic'])))
+
+
+
+
+male_NS_diff_pvalues
+```
+
+
+Determine how mass variation changes over Pd disease status time-steps for male big brown bats
+```{r}
+
+#For mass variation models, will use the latitudinal point where interaction occurs already identified in first average mass model (39.6 degrees N)
+#First make year and month categorical variables
+male_EPFU$year<- factor(male_EPFU$year, levels = c('1990', '1991', '1992', '1994', '1995', '1997', '1998', '1999', '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020'))
+
+male_EPFU$month<- factor(male_EPFU$month, levels = c('3', '4', '5', '6', '7', '8', '9', '10'))
+
+#create 1st model to extract mass variation yearly, monthly and by site
+male_mass_var_mod1<- lmer(mass ~ (1|year) + (1|month) + (1|site_mask), data = male_EPFU)
+
+#check assumptions
+plot_model(male_mass_var_mod1, type='diag')
+
+summary(male_mass_var_mod1)
+
+
+r.squaredGLMM(male_mass_var_mod1)
+
+
+#extract residuals from the model and add to data frame
+male_EPFU$mass_resid<- resid(male_mass_var_mod1)
+
+male_mass_var_mod2<- lm(mass_resid ~ disease_time_step*lat_category, data = male_EPFU, weights = wt_lat_category)
+
+anova(male_mass_var_mod2)
+
+
+summary(male_mass_var_mod2)
+
+
+r.squaredGLMM(male_mass_var_mod2)
+
+
+###Will not move forward with post hoc b/c in 2nd model, y-intercept is not different from 0
+```
+
+
+Plots from publication
+```{r}
+#Figure 1
+
+#subset full data for adults only
+EPFU_adult<- EPFU_data %>%
+  filter(age == 'adult') %>%
+  droplevels()
+
+#create counts by county and state of capture
+EPFUcount_county<- count(EPFU_adult, vars = c('fips', 'rMapCounty', 'rMapState')) %>% 
+  group_by(fips)
+
+#rename to match us_maps for counties
+names(EPFUcount_county)[3]<- 'region'
+names(EPFUcount_county) [2] <- 'subregion'
+
+str(EPFUcount_county)
+head(EPFUcount_county)
+
+#Get US county map layer
+main_counties<- map_data('county')
+
+#get a states layer, too
+main_states<- map_data('state')
+
+#make a clipped map layer with freq by county
+merge_EPFUcount<- inner_join(main_counties, EPFUcount_county, by = c("region", "subregion"))
+#even though the join creates duplicates, it is okay b/c we are going to group by 'group' when mapping which will give the actual count values
+
+
+
+
+
+fig1<- ggplot() +
+  #add base map layer for US states
+  geom_polygon(data=main_states, aes(x=long, y=lat, group = group), fill = 'gray')+
+  #add map layer for adult big brown bat capture counts by county
+  geom_polygon(data=merge_EPFUcount, aes(x=long, y=lat, group=group, fill = freq),  size = 0.2) +
+  #add map layer for US counties to make their outlines
+  geom_polygon(data=main_states, aes(x=long, y=lat, group = group), color="white", size = 1, alpha = 0)+
+  scale_fill_viridis() +
+  theme_minimal()+
+  theme(legend.title.align = 0.5, panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  labs(x= 'Longitude', y= 'Latitude', fill = 'Captures per County')+
+  xlim(-93, -67)
+
+
+fig1
+
+
+
+#Figure 2
+fig2<- ggplot(fem_EPFU, aes(disease_time_step, mass, color = lat_category, fill = lat_category))+
+  facet_wrap(~repstat)+
+  geom_point(alpha = 0.05, position = position_jitter(width = 0.2)) +
+  geom_boxplot(width = 0.45, alpha = 0.3, position = position_dodge(.5), lwd = 1)+
+  scale_color_brewer(palette = 'Set2') +
+  scale_fill_brewer(palette = 'Set2') +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Female Mass (g)")
+
+
+fig2
+
+
+
+#Figure 3
+fig3<- ggplot(fem_NS_diff_df, aes(disease_time_step2, fem_mass_diff))+
+  facet_grid(~repstat2)+
+  geom_point(size = 3) +
+  geom_linerange(aes(ymin = fem_mass_diff - fem_mass_diff_SE, ymax = fem_mass_diff + fem_mass_diff_SE), lwd = 1)+
+  geom_hline(yintercept = 0, lwd = 2, linetype= 'dashed', color = 'gray')+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Female Mass Difference North to South (g)")
+
+
+fig3
+
+
+#Figure 4
+fig4a<- ggplot(male_EPFU, aes(disease_time_step, mass, color = lat_category, fill = lat_category))+
+  geom_point(alpha = 0.05, position = position_jitter(width = 0.2)) +
+  geom_boxplot(width = 0.45, alpha = 0.3, position = position_dodge(.5), lwd = 1)+
+  scale_color_manual(values = c('darkcyan', 'coral3')) +
+  scale_fill_manual(values = c('darkcyan', 'coral3')) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Male Mass (g)")
+
+fig4a
+
+
+fig4b<- ggplot(male_NS_diff_df, aes(disease_time_step3, male_mass_diff))+
+  geom_point(size = 3) +
+  geom_linerange(aes(ymin = male_mass_diff - male_mass_diff_SE, ymax = male_mass_diff + male_mass_diff_SE), lwd = 1)+
+  geom_hline(yintercept = 0, lwd = 2, linetype= 'dashed', color = 'gray')+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Male Mass Difference North to South (g)")
+
+fig4b
+
+fig4<- male_NS_mass + male_mass_diff_plot + plot_layout(widths = c(1, .5))
+
+fig4
+```
+
+Supporting Information Figures
+
+```{r}
+
+#Figure S2
+figS2a<- ggplot(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
+  geom_point(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step), alpha = 0.2, position = position_jitter()) +
+  scale_color_manual(values = c('#0061FF', '#8554D5', '#FF398A', '#FFDA22'))+
+  new_scale_color() +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(x = county_centroid_lat, y = mass), color = '#0061FF', linetype = 'solid', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(x = county_centroid_lat, y = mass), color = '#8554D5', linetype = 'solid', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(x = county_centroid_lat, y = mass), color = '#FF398A', linetype = 'solid', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(x = county_centroid_lat, y = mass), color = '#FFDA22', linetype = 'solid', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(x = county_centroid_lat, y = mass), color = '#0061FF', linetype = 'dashed', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(x = county_centroid_lat, y = mass), color = '#8554D5', linetype = 'dashed', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(x = county_centroid_lat, y = mass), color = '#FF398A', linetype = 'dashed', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(x = county_centroid_lat, y = mass), color = '#FFDA22', linetype = 'dashed', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(x = county_centroid_lat, y = mass), color = '#0061FF', linetype = 'dotted', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(x = county_centroid_lat, y = mass), color = '#8554D5', linetype = 'dotted', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(x = county_centroid_lat, y = mass), color = '#FF398A', linetype = 'dotted', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(x = county_centroid_lat, y = mass), color = '#FFDA22', linetype = 'dotted', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(x = county_centroid_lat, y = mass), color = '#0061FF', linetype = 'dotdash', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(x = county_centroid_lat, y = mass), color = '#8554D5', linetype = 'dotdash', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(x = county_centroid_lat, y = mass), color = '#FF398A', linetype = 'dotdash', lwd = 1) +
+  geom_line(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(x = county_centroid_lat, y = mass), color = '#FFDA22', linetype = 'dotdash', lwd = 1) +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#0061FF', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#8554D5', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FF398A', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'non-reproductive' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FFDA22', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#0061FF', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#8554D5', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FF398A', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'pregnant' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FFDA22', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#0061FF', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#8554D5', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FF398A', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'lactating' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FFDA22', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'pre-invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#0061FF', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'invasion', ], aes(ymin= conf.low, ymax= conf.high), fill = '#8554D5', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'epidemic', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FF398A', alpha = 0.3, linetype = 'blank') +
+  geom_ribbon(data = fem_mass_mod1_pred[fem_mass_mod1_pred$repstat == 'post-lactating' & fem_mass_mod1_pred$disease_time_step == 'established', ], aes(ymin= conf.low, ymax= conf.high), fill = '#FFDA22', alpha = 0.3, linetype = 'blank') +
+  geom_vline(xintercept = 39.6, lwd = 1.5) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="Latitude", y= "Female Mass (g)")
+
+
+figS2b<- ggplot(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
+  geom_point(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step), alpha = 0.2, position = position_jitter()) +
+  scale_colour_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
+  new_scale_color() +
+  geom_smooth(data = male_mass_mod1_pred, aes(x = county_centroid_lat, y = mass, color = disease_time_step), lwd = 1.5) +
+  geom_ribbon(data = male_mass_mod1_pred, aes(ymin= conf.low, ymax= conf.high, fill = disease_time_step), alpha = 0.3, linetype = 'blank') +
+  geom_vline(xintercept = 39.6, lwd = 1.5) +
+  scale_colour_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
+  scale_fill_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="Latitude", y= "Male Mass (g)")
+
+figS2<- figS2a + figS2b
+
+figS2
+
+
+
+#Figure S3
+figS3<- ggplot(fem_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
+  facet_wrap(~repstat) + 
+  geom_point(alpha = 0.05, position = position_jitter(width = 0.3)) +
+  geom_boxplot(width = 0.45, alpha = 0.4, position = position_dodge(.7), lwd = 1)+
+  scale_color_manual(values = c('#0061FF', '#8554D5', '#FF398A', '#FFDA22')) +
+  scale_fill_manual(values = c('#0061FF', '#8554D5', '#FF398A', '#FFDA22')) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor =  element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Female Mass (g)")
+
+figS3
+
+
+
+#Figure S4
+#make post hoc output a dataframe and adjust levels for plotting
+ems_fem_mass_var_mod2_df<- as.data.frame(ems_fem_mass_var_mod2)
+ems_fem_mass_var_mod2_df$lat_category<- factor(ems_fem_mass_var_mod2_df$lat_category, levels = c('south', 'north'))
+
+
+figS4<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = lat_category, y = emmean, color= lat_category)) +
+  facet_wrap(~repstat*disease_time_step) +
+  geom_point(size = 3.25, aes(x = lat_category, y = emmean, color = lat_category))+
+  geom_linerange(aes(ymin = lower.CL, ymax = upper.CL, color = lat_category), lwd = 5, alpha = 0.5) + 
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'black') +
+  coord_flip() +
+  scale_color_brewer(palette = 'Set2', direction = -1) +
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+  theme(legend.title = element_blank())+
+  theme(legend.position = "none") +
+  labs(x = ' ', y="Female Mass Residuals")
+
+figS4
+
+
+
+#Figure S5
+#readjust levels in post hoc dataframe for plotting
+ems_fem_mass_var_mod2_df$lat_category<- factor(ems_fem_mass_var_mod2_df$lat_category, levels = c('north', 'south'))
+
+figS5<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = disease_time_step, y = emmean, color= disease_time_step)) +
+  facet_wrap(~lat_category*repstat, ncol = 4, nrow = 2) +
+  geom_point(size = 3.25, aes(x = disease_time_step, y = emmean, color = disease_time_step))+
+  geom_linerange(aes(ymin = lower.CL, ymax = upper.CL, color = disease_time_step), lwd = 5, alpha = 0.5) + 
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'black') +
+  coord_flip() +
+  scale_color_manual(values = c('#0061FF', '#8554D5', '#FF398A', '#FFDA22')) +
+  theme_minimal()+
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = "black"))+
+  theme(legend.title = element_blank())+
+  theme(legend.position = "none") +
+  labs(x = ' ', y="Female Mass Residuals")
+
+figS5
+
+
+
+#Figure S6
+figS6<- ggplot(male_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
+  geom_point(alpha = 0.05, position = position_jitter(width = 0.3)) +
+  geom_boxplot(width = 0.45, alpha = 0.4, position = position_dodge(.7), lwd = 1)+
+  scale_color_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
+  scale_fill_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
+  theme_minimal()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor =  element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Male Mass (g)")
+
+figS6
+
+```
+
+Supporting Information Tables
+```{r}
+#Table S1
+tab_model(fem_mass_mod1, fem_mass_mod2)
+
+#Table S2
+tab_model(fem_mass_var_mod1, fem_mass_var_mod2)
+
+#Table S3
+tab_model(male_mass_mod1, male_mass_mod2)
+
+#Table S4
+tab_model(male_mass_var_mod1, male_mass_var_mod2)
+
+```
+
