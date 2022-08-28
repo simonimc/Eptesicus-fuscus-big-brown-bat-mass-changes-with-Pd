@@ -643,7 +643,7 @@ Supporting Information Figures
 
 
 ```{r}
-#Figure S2
+#Figure S1
 #First create a dataframe for adult big brown bat capture counts by time-step, sex, and site
 EPFU_count_adult<- count(EPFU_adult, vars = c('sex', 'site_mask', 'disease_time_step')) %>% 
   group_by(sex)
@@ -681,7 +681,7 @@ disease_sex_cps$sex2<- factor(disease_sex_cps$sex2, levels = c('female', 'male')
 disease_sex_cps$disease_time_step2<- factor(disease_sex_cps$disease_time_step2, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
 
 #captures per site by disease time-steps and sex
-FigS2<- ggplot(disease_sex_cps, aes(sex2, cap_per_site, color = disease_time_step2, fill = disease_time_step2))+
+FigS1<- ggplot(disease_sex_cps, aes(sex2, cap_per_site, color = disease_time_step2, fill = disease_time_step2))+
   geom_bar(stat="identity")+
   scale_color_manual(values= c('#83CAFF', '#FF950E', '#FFD320', '#579D1C')) +
   scale_fill_manual(values= c('#83CAFF', '#FF950E', '#FFD320', '#579D1C')) +
@@ -697,7 +697,7 @@ FigS2<- ggplot(disease_sex_cps, aes(sex2, cap_per_site, color = disease_time_ste
   theme(legend.title = element_blank())+
   labs(x="", y= "Total Number of Bat Captures Per Number of Sites")
 
-FigS2
+FigS1
 
 
 
