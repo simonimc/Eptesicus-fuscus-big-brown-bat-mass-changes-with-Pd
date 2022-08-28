@@ -641,10 +641,68 @@ fig4
 
 Supporting Information Figures
 
-```{r}
 
+```{r}
 #Figure S2
-figS2a<- ggplot(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
+#First create a dataframe for adult big brown bat capture counts by time-step, sex, and site
+EPFU_count_adult<- count(EPFU_adult, vars = c('sex', 'site_mask', 'disease_time_step')) %>% 
+  group_by(sex)
+
+#Create a vector of number of capture / number of sites for each time-step and sex
+cap_per_site<- c(sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'pre-invasion' & EPFU_count_adult$sex == 'female'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'pre-invasion' & EPFU_count_adult$sex == 'female'])),
+  
+           sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'invasion' & EPFU_count_adult$sex == 'female'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'invasion' & EPFU_count_adult$sex == 'female'])), 
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'epidemic' & EPFU_count_adult$sex == 'female'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'epidemic' & EPFU_count_adult$sex == 'female'])),
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'established' & EPFU_count_adult$sex == 'female'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'established' & EPFU_count_adult$sex == 'female'])),
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'pre-invasion' & EPFU_count_adult$sex == 'male'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'pre-invasion' & EPFU_count_adult$sex == 'male'])),
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'invasion' & EPFU_count_adult$sex == 'male'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'invasion' & EPFU_count_adult$sex == 'male'])), 
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'epidemic' & EPFU_count_adult$sex == 'male'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'epidemic' & EPFU_count_adult$sex == 'male'])),
+  
+          sum(EPFU_count_adult$freq[EPFU_count_adult$disease_time_step == 'established' & EPFU_count_adult$sex == 'male'])/length(unique(EPFU_count_adult$site_mask[EPFU_count_adult$disease_time_step == 'established' & EPFU_count_adult$sex == 'male'])))
+
+#then create a vector for age
+sex2<- c(rep('female', 4), rep('male', 4))
+
+
+#then create a vector for time-steps
+disease_time_step2<- rep(c('pre-invasion', 'invasion', 'epidemic', 'established'), 2)
+
+#now combine into dataframe
+disease_sex_cps<- data.frame(cap_per_site, sex2, disease_time_step2)
+
+#fix levels in the new dataframe
+disease_sex_cps$sex2<- factor(disease_sex_cps$sex2, levels = c('female', 'male'))
+
+disease_sex_cps$disease_time_step2<- factor(disease_sex_cps$disease_time_step2, levels = c('pre-invasion', 'invasion', 'epidemic', 'established'))
+
+#captures per site by disease time-steps and sex
+FigS2<- ggplot(disease_sex_cps, aes(sex2, cap_per_site, color = disease_time_step2, fill = disease_time_step2))+
+  geom_bar(stat="identity")+
+  scale_color_manual(values= c('#83CAFF', '#FF950E', '#FFD320', '#579D1C')) +
+  scale_fill_manual(values= c('#83CAFF', '#FF950E', '#FFD320', '#579D1C')) +
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        legend.background = element_rect(fill = "transparent", colour = NA), 
+        legend.box.background = element_rect(fill = "transparent", colour = NA), 
+        legend.key = element_rect(fill = "transparent", colour = NA),
+        axis.line = element_line(colour = "black"))+
+  theme(legend.title = element_blank())+
+  labs(x="", y= "Total Number of Bat Captures Per Number of Sites")
+
+FigS2
+
+
+
+#Figure S3
+figS3a<- ggplot(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
   geom_point(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step), alpha = 0.2, position = position_jitter()) +
   scale_color_manual(values = c('#0061FF', '#8554D5', '#FF398A', '#FFDA22'))+
   new_scale_color() +
@@ -694,7 +752,7 @@ figS2a<- ggplot(data = fem_EPFU, aes(x= county_centroid_lat, y= mass, color = di
   labs(x="Latitude", y= "Female Mass (g)")
 
 
-figS2b<- ggplot(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
+figS3b<- ggplot(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step))+
   geom_point(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = disease_time_step), alpha = 0.2, position = position_jitter()) +
   scale_colour_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
   new_scale_color() +
@@ -715,14 +773,14 @@ figS2b<- ggplot(data = male_EPFU, aes(x= county_centroid_lat, y= mass, color = d
   theme(legend.title = element_blank())+
   labs(x="Latitude", y= "Male Mass (g)")
 
-figS2<- figS2a + figS2b
+figS3<- figS3a + figS3b
 
-figS2
+figS3
 
 
 
-#Figure S3
-figS3<- ggplot(fem_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
+#Figure S4
+figS4<- ggplot(fem_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
   facet_wrap(~repstat) + 
   geom_point(alpha = 0.05, position = position_jitter(width = 0.3)) +
   geom_boxplot(width = 0.45, alpha = 0.4, position = position_dodge(.7), lwd = 1)+
@@ -740,17 +798,17 @@ figS3<- ggplot(fem_EPFU, aes(lat_category, mass, color = disease_time_step, fill
   theme(legend.title = element_blank())+
   labs(x="", y= "Female Mass (g)")
 
-figS3
+figS4
 
 
 
-#Figure S4
+#Figure S5
 #make post hoc output a dataframe and adjust levels for plotting
 ems_fem_mass_var_mod2_df<- as.data.frame(ems_fem_mass_var_mod2)
 ems_fem_mass_var_mod2_df$lat_category<- factor(ems_fem_mass_var_mod2_df$lat_category, levels = c('south', 'north'))
 
 
-figS4<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = lat_category, y = emmean, color= lat_category)) +
+figS5<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = lat_category, y = emmean, color= lat_category)) +
   facet_wrap(~repstat*disease_time_step) +
   geom_point(size = 3.25, aes(x = lat_category, y = emmean, color = lat_category))+
   geom_linerange(aes(ymin = lower.CL, ymax = upper.CL, color = lat_category), lwd = 5, alpha = 0.5) + 
@@ -764,15 +822,15 @@ figS4<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = lat_category, y = emmean
   theme(legend.position = "none") +
   labs(x = ' ', y="Female Mass Residuals")
 
-figS4
+figS5
 
 
 
-#Figure S5
+#Figure S6
 #readjust levels in post hoc dataframe for plotting
 ems_fem_mass_var_mod2_df$lat_category<- factor(ems_fem_mass_var_mod2_df$lat_category, levels = c('north', 'south'))
 
-figS5<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = disease_time_step, y = emmean, color= disease_time_step)) +
+figS6<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = disease_time_step, y = emmean, color= disease_time_step)) +
   facet_wrap(~lat_category*repstat, ncol = 4, nrow = 2) +
   geom_point(size = 3.25, aes(x = disease_time_step, y = emmean, color = disease_time_step))+
   geom_linerange(aes(ymin = lower.CL, ymax = upper.CL, color = disease_time_step), lwd = 5, alpha = 0.5) + 
@@ -787,12 +845,12 @@ figS5<- ggplot(data = ems_fem_mass_var_mod2_df, aes(x = disease_time_step, y = e
   theme(legend.position = "none") +
   labs(x = ' ', y="Female Mass Residuals")
 
-figS5
+figS6
 
 
 
-#Figure S6
-figS6<- ggplot(male_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
+#Figure S7
+figS7<- ggplot(male_EPFU, aes(lat_category, mass, color = disease_time_step, fill = disease_time_step))+
   geom_point(alpha = 0.05, position = position_jitter(width = 0.3)) +
   geom_boxplot(width = 0.45, alpha = 0.4, position = position_dodge(.7), lwd = 1)+
   scale_color_manual(values = c("#A93226", "#633974", "#45B39D", "#F1C40F")) +
@@ -809,7 +867,7 @@ figS6<- ggplot(male_EPFU, aes(lat_category, mass, color = disease_time_step, fil
   theme(legend.title = element_blank())+
   labs(x="", y= "Male Mass (g)")
 
-figS6
+figS7
 
 ```
 
